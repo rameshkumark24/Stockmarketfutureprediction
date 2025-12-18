@@ -62,7 +62,8 @@ st.sidebar.subheader('Select Stock')
 selected_stock_name = st.sidebar.selectbox(f"Choose a {market_choice} Stock", ['Custom'] + list(stock_dict.keys()))
 
 if selected_stock_name == 'Custom':
-    user_input = st.sidebar.text_input('Enter Custom Symbol (e.g., ZOMATO)', 'ZOMATO')
+    # CHANGED: Default is now TATASTEEL instead of ZOMATO
+    user_input = st.sidebar.text_input('Enter Custom Symbol (e.g., TATASTEEL)', 'TATASTEEL')
     
     # FIX: Force Uppercase and Remove Spaces
     user_input = user_input.upper().strip() 
@@ -76,13 +77,13 @@ else:
     stock_symbol = stock_dict[selected_stock_name]
 
 # --- Data Fetching ---
-# FIX: Use period='max' to handle new stocks like Zomato/Paytm
 st.write(f"Fetching data for: **{stock_symbol}**")
 
 @st.cache_data
 def load_data(symbol):
     try:
-        # period='max' fetches all available data from the start of the stock's listing
+        # period='max' fetches all available data from the very beginning
+        # This handles both old companies (Tata Steel) and new ones (Zomato) automatically
         data = yf.download(symbol, period="max")
         return data
     except Exception as e:
@@ -120,10 +121,10 @@ try:
     def train_model(data_train_array):
         x_train = []
         y_train = []
-        # If data is too short (less than 100 days), reduce lookback
+        # Dynamic lookback: 100 days for old stocks, 30 days for new stocks
         lookback = 100
         if len(data_train_array) < 200:
-             lookback = 30 # For very new stocks
+             lookback = 30 
         
         for i in range(lookback, data_train_array.shape[0]):
             x_train.append(data_train_array[i-lookback: i])
