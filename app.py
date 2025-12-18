@@ -10,7 +10,7 @@ from keras.layers import Dense, Dropout, LSTM
 
 # --- Page Config ---
 st.set_page_config(page_title="Indian Stock Predictor", layout="wide")
-st.header('📈 Indian Stock Market Predictor')
+st.header('Indian Stock Market Predictor')
 
 # --- Market Lists ---
 # NIFTY 50 (NSE) - Tickers end with .NS
