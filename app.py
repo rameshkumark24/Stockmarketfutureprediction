@@ -64,14 +64,10 @@ selected_stock_name = st.sidebar.selectbox(f"Choose a {market_choice} Stock", ['
 if selected_stock_name == 'Custom':
     user_input = st.sidebar.text_input('Enter Custom Symbol (e.g., ZOMATO)', 'ZOMATO')
     
-    # FIX 1: Force Uppercase and Remove Spaces
+    # FIX: Force Uppercase and Remove Spaces
     user_input = user_input.upper().strip() 
     
     # Auto-fix suffix if missing
-    if not user_input.endswith('.NS') and not user_input.endswith('.BO'):
-        stock_symbol = f"{user_input}{suffix}"
-    else:
-        stock_symbol = user_input
     if not user_input.endswith('.NS') and not user_input.endswith('.BO'):
         stock_symbol = f"{user_input}{suffix}"
     else:
@@ -80,21 +76,23 @@ else:
     stock_symbol = stock_dict[selected_stock_name]
 
 # --- Data Fetching ---
-start = '2015-01-01'
-end = date.today().strftime("%Y-%m-%d")
-
-st.write(f"Fetching data for: **{stock_symbol}** from {start} to {end}")
+# FIX: Use period='max' to handle new stocks like Zomato/Paytm
+st.write(f"Fetching data for: **{stock_symbol}**")
 
 @st.cache_data
-def load_data(symbol, start, end):
-    data = yf.download(symbol, start, end)
-    return data
+def load_data(symbol):
+    try:
+        # period='max' fetches all available data from the start of the stock's listing
+        data = yf.download(symbol, period="max")
+        return data
+    except Exception as e:
+        return pd.DataFrame()
 
 try:
-    data = load_data(stock_symbol, start, end)
+    data = load_data(stock_symbol)
     
     if data.empty:
-        st.error(f"No data found for {stock_symbol}. Try checking the symbol.")
+        st.error(f"❌ No data found for {stock_symbol}. Please check if the ticker is correct.")
         st.stop()
 
     st.subheader(f'{stock_symbol} - Stock Data (INR)')
@@ -122,8 +120,13 @@ try:
     def train_model(data_train_array):
         x_train = []
         y_train = []
-        for i in range(100, data_train_array.shape[0]):
-            x_train.append(data_train_array[i-100: i])
+        # If data is too short (less than 100 days), reduce lookback
+        lookback = 100
+        if len(data_train_array) < 200:
+             lookback = 30 # For very new stocks
+        
+        for i in range(lookback, data_train_array.shape[0]):
+            x_train.append(data_train_array[i-lookback: i])
             y_train.append(data_train_array[i, 0])
         x_train, y_train = np.array(x_train), np.array(y_train)
 
@@ -139,20 +142,20 @@ try:
         model.add(Dense(units=1))
         model.compile(optimizer='adam', loss='mean_squared_error')
         model.fit(x_train, y_train, epochs=5, batch_size=32, verbose=0)
-        return model
+        return model, lookback
 
     with st.spinner('Training AI Model...'):
-        model = train_model(data_train_array)
+        model, lookback = train_model(data_train_array)
 
     # --- Predictions ---
-    pas_100_days = data_train.tail(100)
-    final_df = pd.concat([pas_100_days, data_test], ignore_index=True)
+    pas_lookback_days = data_train.tail(lookback)
+    final_df = pd.concat([pas_lookback_days, data_test], ignore_index=True)
     input_data = scaler.transform(final_df)
 
     x_test = []
     y_test = []
-    for i in range(100, input_data.shape[0]):
-        x_test.append(input_data[i-100: i])
+    for i in range(lookback, input_data.shape[0]):
+        x_test.append(input_data[i-lookback: i])
         y_test.append(input_data[i, 0])
 
     x_test, y_test = np.array(x_test), np.array(y_test)
