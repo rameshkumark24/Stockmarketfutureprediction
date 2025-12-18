@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import yfinance as yf
 import streamlit as st
-from datetime import date, timedelta
+from datetime import timedelta
 from sklearn.preprocessing import MinMaxScaler
 from keras.models import Sequential
 from keras.layers import Dense, Dropout, LSTM
@@ -12,7 +12,7 @@ from keras.layers import Dense, Dropout, LSTM
 st.set_page_config(page_title="Indian Stock Predictor", layout="wide")
 st.header('📈 Indian Stock Market Predictor')
 
-# --- Market Lists (Same as before) ---
+# --- Market Lists ---
 nifty_50_dict = {
     'ADANIENT': 'ADANIENT.NS', 'ADANIPORTS': 'ADANIPORTS.NS', 'APOLLOHOSP': 'APOLLOHOSP.NS', 
     'ASIANPAINT': 'ASIANPAINT.NS', 'AXISBANK': 'AXISBANK.NS', 'BAJAJ-AUTO': 'BAJAJ-AUTO.NS', 
@@ -75,7 +75,9 @@ st.write(f"Fetching data for: **{stock_symbol}**")
 @st.cache_data
 def load_data(symbol):
     try:
+        # Use 10 years for stable training
         data = yf.download(symbol, period="10y") 
+        # Fallback for new stocks (like Zomato) if 10y returns nothing
         if data.empty or len(data) < 200: 
             data = yf.download(symbol, period="max")
         return data
@@ -109,6 +111,9 @@ try:
     data_close_values = data.Close.values.reshape(-1, 1)
     data_train_array = scaler.fit_transform(data_close_values)
 
+    # FIX: Cached Training
+    # @st.cache_resource saves the TRAINED model. 
+    # It only re-runs if 'data_train_array' changes (i.e., new stock selected).
     @st.cache_resource
     def train_model(data_train_array):
         x_train = []
@@ -137,10 +142,10 @@ try:
         model.fit(x_train, y_train, epochs=50, batch_size=32, verbose=0)
         return model, lookback
 
-    with st.spinner('Training AI Model (50 Epochs for better accuracy)...'):
+    with st.spinner('Training AI Model (Using Cached Brain if available)...'):
         model, lookback = train_model(data_train_array)
 
-    # --- Test Accuracy (Corrected) ---
+    # --- Test Accuracy (Past vs Predicted) ---
     test_start_index = int(len(data_close_values) * 0.7)
     input_data = data_close_values[test_start_index - lookback:]
     input_data = scaler.transform(input_data)
@@ -165,10 +170,10 @@ try:
     plt.legend()
     st.pyplot(fig2)
 
-    # --- FUTURE PREDICTION (Improved with Calibration) ---
+    # --- FUTURE PREDICTION (Continuous with Current Value) ---
     st.subheader('🔮 Future Price Prediction (Next 10 Days)')
     
-    # 1. Get raw future predictions
+    # 1. Predict Future Trend
     last_days_data = data_close_values[-lookback:]
     last_days_scaled = scaler.transform(last_days_data)
     
@@ -180,64 +185,50 @@ try:
         future_predictions.append(pred[0])
         current_batch = np.append(current_batch[:, 1:, :], [[pred]], axis=1)
 
-    # 2. Inverse scale
     future_predictions = np.array(future_predictions) * scale_factor
     
-    # 3. FIX: CALCULATE BIAS (Difference between Today's Actual vs Model's "Today")
-    # We predict "Today" using the model to see how far off it is
-    last_known_batch = last_days_scaled[:-1].reshape(1, lookback-1, 1) # This logic is complex, let's use a simpler anchor
-    
-    # Simpler Anchor Logic:
-    # We know the LAST REAL PRICE (Today's Close)
+    # 2. FIX: Anchor to Today's Price (Zero-Gap Logic)
     last_real_price = data_close_values[-1][0]
-    
-    # We compare it to the FIRST predicted future point
-    # Ideally, Day 1 Prediction should be close to Day 0 Actual
-    # We shift the whole curve so it starts from Last Real Price
-    
-    # Calculate gap between "Model's first day prediction" and "Actual Last Close"
-    # Actually, a smoother way is to shift based on the trend. 
-    # Let's simply offset the difference.
-    
-    # We assume the model's *shape* is correct, but *level* is wrong.
-    # We force the start of the prediction to align with the last known price.
-    
     first_pred = future_predictions[0]
-    gap = last_real_price - first_pred
+    gap = last_real_price - first_pred # Calculate the error
+    corrected_predictions = future_predictions + gap # Shift the curve up/down
     
-    # Apply Correction to ALL future predictions
-    corrected_predictions = future_predictions + gap
+    # 3. Create Continuous Dates
+    # Start from the LAST DATE in the dataset (not just "today")
+    last_date = data.index[-1]
+    future_dates = []
     
-    # 4. Connect the line visually
-    # We prepend the LAST KNOWN DATE and PRICE to the future lists
-    # This creates a solid line from the Green chart to the Red chart without a gap
+    # Generate next 10 business days (skipping weekends simple logic)
+    # For simple chart, consecutive days is fine
+    for i in range(1, 11):
+        future_dates.append(last_date + timedelta(days=i))
     
-    future_dates = pd.date_range(start=date.today(), periods=11) # Start from TODAY
+    # 4. Final Plotting Lists (Attach Last Real Price to start of Future Line)
+    # This visually connects Green and Red lines
+    plot_dates = [last_date] + future_dates
+    plot_preds = [last_real_price] + list(corrected_predictions)
     
-    # Final plot lists
-    final_pred_values = [last_real_price] + list(corrected_predictions) # Start with actual, then follow predicted trend
-    
-    # Display Future Data Table
+    # Display Table
     future_df = pd.DataFrame({
         'Date': future_dates, 
-        'Predicted Price (INR)': final_pred_values
+        'Predicted Price (INR)': corrected_predictions
     })
-    st.write(future_df.iloc[1:]) # Show table from tomorrow onwards
+    st.write(future_df)
 
-    # Plot Future
+    # Plot
     fig3 = plt.figure(figsize=(10,6))
     
-    # Plot last 50 days of ACTUAL data
-    plt.plot(data.index[-50:], data.Close[-50:], 'g', label='Past 50 Days (Actual)')
+    # Plot recent history
+    plt.plot(data.index[-50:], data.Close[-50:], 'g', label='History (Last 50 Days)')
     
-    # Plot Future (Starting from Today to connect lines)
-    plt.plot(future_dates, final_pred_values, 'r--', marker='o', label='Next 10 Days (AI Forecast)')
+    # Plot future (connected)
+    plt.plot(plot_dates, plot_preds, 'r--', marker='o', label='AI Forecast (Next 10 Days)')
     
-    plt.title(f'{stock_symbol} Future Forecast (Calibrated)')
+    plt.title(f'{stock_symbol} Price Forecast')
     plt.xlabel('Date')
-    plt.ylabel('Price')
-    plt.grid(True)
+    plt.ylabel('Price (INR)')
     plt.legend()
+    plt.grid(True)
     st.pyplot(fig3)
 
 except Exception as e:
