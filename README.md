@@ -109,5 +109,3 @@ Distributed under the MIT License. See `LICENSE` for more information.
 ---
 
 *Created by [Ramesh Kumar*](https://www.google.com/search?q=https://github.com/rameshkumark24)
-
-```
