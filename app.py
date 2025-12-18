@@ -7,85 +7,132 @@ from sklearn.preprocessing import MinMaxScaler
 from keras.models import Sequential
 from keras.layers import Dense, Dropout, LSTM
 
-# --- UI Setup ---
-st.header('Stock Market Predictor')
+# --- Indian Market Customizations ---
+st.set_page_config(page_title="Nifty 50 Predictor", layout="wide")
+st.header('📈 Indian Stock Market Predictor')
 
-stock = st.text_input('Enter Stock Symbol', 'ZOMATO.NS')
+# Sidebar for Indian Stock Selection
+st.sidebar.subheader('Select Stock')
+nifty_50 = [
+    'RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'INFY', 'SBIN', 'BHARTIARTL', 'ITC', 
+    'LTIM', 'TATAMOTORS', 'LT', 'HCLTECH', 'AXISBANK', 'MARUTI', 'TITAN', 'ZOMATO'
+]
+# Add a "Custom" option so users can type any other stock
+stock_selection = st.sidebar.selectbox("Choose a NIFTY 50 Stock", ['Custom'] + nifty_50)
+
+if stock_selection == 'Custom':
+    user_input = st.sidebar.text_input('Enter Custom Symbol (e.g., ZOMATO)', 'ZOMATO')
+else:
+    user_input = stock_selection
+
+# Auto-append .NS for NSE stocks if missing
+if not user_input.endswith('.NS') and not user_input.endswith('.BO'):
+    stock_symbol = f"{user_input}.NS"
+else:
+    stock_symbol = user_input
+
+# Date Inputs
 start = '2015-01-01'
 end = '2025-01-01'
 
-data = yf.download(stock, start, end)
+st.write(f"Fetching data for: **{stock_symbol}**")
 
-st.subheader('Stock Data')
-st.write(data)
+# Load Data
+try:
+    data = yf.download(stock_symbol, start, end)
+    
+    if data.empty:
+        st.error("No data found. Please check the stock symbol.")
+        st.stop()
 
-data_train = pd.DataFrame(data.Close[0: int(len(data)*0.80)])
-data_test = pd.DataFrame(data.Close[int(len(data)*0.80): len(data)])
+    st.subheader('Stock Data (INR)')
+    st.write(data.tail()) # Show latest data first
 
-scaler = MinMaxScaler(feature_range=(0,1))
+    # Prepare Data for Training
+    data_train = pd.DataFrame(data.Close[0: int(len(data)*0.80)])
+    data_test = pd.DataFrame(data.Close[int(len(data)*0.80): len(data)])
 
-# --- Moving Averages (Your existing logic) ---
-st.subheader('Price vs MA50')
-ma_50_days = data.Close.rolling(50).mean()
-fig1 = plt.figure(figsize=(8,6))
-plt.plot(ma_50_days, 'r', label='MA50')
-plt.plot(data.Close, 'g', label='Price')
-plt.legend()
-st.pyplot(fig1)
+    scaler = MinMaxScaler(feature_range=(0,1))
 
-st.subheader('Price vs MA50 vs MA100')
-ma_100_days = data.Close.rolling(100).mean()
-fig2 = plt.figure(figsize=(8,6))
-plt.plot(ma_50_days, 'r', label='MA50')
-plt.plot(ma_100_days, 'b', label='MA100')
-plt.plot(data.Close, 'g', label='Price')
-plt.legend()
-st.pyplot(fig2)
+    # --- Analysis Section (Your Original Logic) ---
+    st.subheader('Price vs Moving Averages')
+    ma_50 = data.Close.rolling(50).mean()
+    ma_200 = data.Close.rolling(200).mean()
+    
+    fig1 = plt.figure(figsize=(10,6))
+    plt.plot(data.Close, 'g', label='Close Price (₹)')
+    plt.plot(ma_50, 'r', label='50 Day MA')
+    plt.plot(ma_200, 'b', label='200 Day MA')
+    plt.title(f"{stock_symbol} Price Analysis")
+    plt.xlabel('Year')
+    plt.ylabel('Price (INR)')
+    plt.legend()
+    st.pyplot(fig1)
 
-# --- Prediction Model (The "Resume Worthy" Part) ---
-# Prepare data for LSTM
-pas_100_days = data_train.tail(100)
-final_df = pd.concat([pas_100_days, data_test], ignore_index=True)
-input_data = scaler.fit_transform(final_df)
+    # --- LSTM Prediction Section ---
+    # Prepare training data
+    x_train = []
+    y_train = []
+    
+    # Scale data
+    data_train_array = scaler.fit_transform(data_train)
+    
+    # Create sequences (100 days lookback)
+    for i in range(100, data_train_array.shape[0]):
+        x_train.append(data_train_array[i-100: i])
+        y_train.append(data_train_array[i, 0])
 
-x_test = []
-y_test = []
+    x_train, y_train = np.array(x_train), np.array(y_train)
 
-for i in range(100, input_data.shape[0]):
-    x_test.append(input_data[i-100: i])
-    y_test.append(input_data[i, 0])
+    # Build LSTM Model
+    model = Sequential()
+    model.add(LSTM(units=50, activation='relu', return_sequences=True, input_shape=(x_train.shape[1], 1)))
+    model.add(Dropout(0.2))
+    model.add(LSTM(units=60, activation='relu', return_sequences=True))
+    model.add(Dropout(0.3))
+    model.add(LSTM(units=80, activation='relu', return_sequences=True))
+    model.add(Dropout(0.4))
+    model.add(LSTM(units=120, activation='relu'))
+    model.add(Dropout(0.5))
+    model.add(Dense(units=1))
 
-x_test, y_test = np.array(x_test), np.array(y_test)
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    
+    # Train (with a loading spinner)
+    with st.spinner('Training AI Model on Indian Market Trends...'):
+        model.fit(x_train, y_train, epochs=5, batch_size=32, verbose=0)
 
-# Build LSTM Model (Simplified for deployment speed)
-model = Sequential()
-model.add(LSTM(units=50, activation='relu', return_sequences=True, input_shape=(x_test.shape[1], 1)))
-model.add(Dropout(0.2))
-model.add(LSTM(units=60, activation='relu', return_sequences=True))
-model.add(Dropout(0.3))
-model.add(LSTM(units=80, activation='relu', return_sequences=True))
-model.add(Dropout(0.4))
-model.add(LSTM(units=120, activation='relu'))
-model.add(Dropout(0.5))
-model.add(Dense(units=1))
+    # Prepare Test Data
+    pas_100_days = data_train.tail(100)
+    final_df = pd.concat([pas_100_days, data_test], ignore_index=True)
+    input_data = scaler.transform(final_df)
 
-# Compile and Train (In a real app, load a pre-trained model to save time)
-model.compile(optimizer='adam', loss='mean_squared_error')
-with st.spinner('Training Model... (this may take a minute)'):
-    model.fit(x_test, y_test, epochs=5, batch_size=32, verbose=0) # Low epochs for demo speed
+    x_test = []
+    y_test = []
 
-# Predict
-predictions = model.predict(x_test)
-scale_factor = 1/scaler.scale_[0]
-predictions = predictions * scale_factor
-y_test = y_test * scale_factor
+    for i in range(100, input_data.shape[0]):
+        x_test.append(input_data[i-100: i])
+        y_test.append(input_data[i, 0])
 
-# Plot Predictions
-st.subheader('Original Price vs Predicted Price')
-fig4 = plt.figure(figsize=(8,6))
-plt.plot(y_test, 'g', label='Original Price')
-plt.plot(predictions, 'r', label='Predicted Price')
-plt.xlabel('Time')
-plt.ylabel('Price')
-plt.legend()
-st.pyplot(fig4)
+    x_test, y_test = np.array(x_test), np.array(y_test)
+
+    # Make Predictions
+    y_predicted = model.predict(x_test)
+    
+    # Scale back to original price
+    scale_factor = 1/scaler.scale_[0]
+    y_predicted = y_predicted * scale_factor
+    y_test = y_test * scale_factor
+
+    # Plot Predictions
+    st.subheader('Prediction vs Original')
+    fig2 = plt.figure(figsize=(10,6))
+    plt.plot(y_test, 'g', label='Original Price')
+    plt.plot(y_predicted, 'r', label='AI Predicted Price')
+    plt.xlabel('Time')
+    plt.ylabel('Price (INR)')
+    plt.legend()
+    st.pyplot(fig2)
+
+except Exception as e:
+    st.error(f"Error: {e}")
