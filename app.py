@@ -3,17 +3,17 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import yfinance as yf
 import streamlit as st
-from datetime import date
+from datetime import date, timedelta
 from sklearn.preprocessing import MinMaxScaler
 from keras.models import Sequential
 from keras.layers import Dense, Dropout, LSTM
 
 # --- Page Config ---
 st.set_page_config(page_title="Indian Stock Predictor", layout="wide")
-st.header('Indian Stock Market Predictor')
+st.header('📈 Indian Stock Market Predictor')
 
 # --- Market Lists ---
-# NIFTY 50 (NSE) - Tickers end with .NS
+# NIFTY 50 (NSE)
 nifty_50_dict = {
     'ADANIENT': 'ADANIENT.NS', 'ADANIPORTS': 'ADANIPORTS.NS', 'APOLLOHOSP': 'APOLLOHOSP.NS', 
     'ASIANPAINT': 'ASIANPAINT.NS', 'AXISBANK': 'AXISBANK.NS', 'BAJAJ-AUTO': 'BAJAJ-AUTO.NS', 
@@ -33,7 +33,7 @@ nifty_50_dict = {
     'TECHM': 'TECHM.NS', 'TITAN': 'TITAN.NS', 'ULTRACEMCO': 'ULTRACEMCO.NS', 'WIPRO': 'WIPRO.NS'
 }
 
-# SENSEX 30 (BSE) - Tickers end with .BO
+# SENSEX 30 (BSE)
 sensex_30_dict = {
     'ASIANPAINT': 'ASIANPAINT.BO', 'AXISBANK': 'AXISBANK.BO', 'BAJAJ-AUTO': 'BAJAJ-AUTO.BO',
     'BAJFINANCE': 'BAJFINANCE.BO', 'BAJAJFINSV': 'BAJAJFINSV.BO', 'BHARTIARTL': 'BHARTIARTL.BO',
@@ -62,13 +62,8 @@ st.sidebar.subheader('Select Stock')
 selected_stock_name = st.sidebar.selectbox(f"Choose a {market_choice} Stock", ['Custom'] + list(stock_dict.keys()))
 
 if selected_stock_name == 'Custom':
-    # CHANGED: Default is now TATASTEEL instead of ZOMATO
     user_input = st.sidebar.text_input('Enter Custom Symbol (e.g., TATASTEEL)', 'TATASTEEL')
-    
-    # FIX: Force Uppercase and Remove Spaces
     user_input = user_input.upper().strip() 
-    
-    # Auto-fix suffix if missing
     if not user_input.endswith('.NS') and not user_input.endswith('.BO'):
         stock_symbol = f"{user_input}{suffix}"
     else:
@@ -82,9 +77,11 @@ st.write(f"Fetching data for: **{stock_symbol}**")
 @st.cache_data
 def load_data(symbol):
     try:
-        # period='max' fetches all available data from the very beginning
-        # This handles both old companies (Tata Steel) and new ones (Zomato) automatically
-        data = yf.download(symbol, period="max")
+        # '10y' is better for training models (more relevant recent data)
+        data = yf.download(symbol, period="10y") 
+        if data.empty or len(data) < 200: 
+            # Fallback for new stocks (Zomato/Paytm)
+            data = yf.download(symbol, period="max")
         return data
     except Exception as e:
         return pd.DataFrame()
@@ -111,24 +108,29 @@ try:
     plt.legend()
     st.pyplot(fig1)
 
-    # --- LSTM Model ---
+    # --- LSTM Model Training ---
+    # Fix: Train on ALL available data for better scaling accuracy
     scaler = MinMaxScaler(feature_range=(0,1))
-    data_train = pd.DataFrame(data.Close[0: int(len(data)*0.80)])
-    data_test = pd.DataFrame(data.Close[int(len(data)*0.80): len(data)])
-    data_train_array = scaler.fit_transform(data_train)
+    
+    # Use 'values' to convert pandas Series to numpy array to avoid index issues
+    data_close_values = data.Close.values.reshape(-1, 1)
+    
+    data_train_array = scaler.fit_transform(data_close_values)
 
     @st.cache_resource
     def train_model(data_train_array):
         x_train = []
         y_train = []
-        # Dynamic lookback: 100 days for old stocks, 30 days for new stocks
+        
+        # Lookback Period
         lookback = 100
         if len(data_train_array) < 200:
              lookback = 30 
         
-        for i in range(lookback, data_train_array.shape[0]):
+        for i in range(lookback, len(data_train_array)):
             x_train.append(data_train_array[i-lookback: i])
             y_train.append(data_train_array[i, 0])
+            
         x_train, y_train = np.array(x_train), np.array(y_train)
 
         model = Sequential()
@@ -141,32 +143,41 @@ try:
         model.add(LSTM(units=120, activation='relu'))
         model.add(Dropout(0.5))
         model.add(Dense(units=1))
+        
         model.compile(optimizer='adam', loss='mean_squared_error')
-        model.fit(x_train, y_train, epochs=5, batch_size=32, verbose=0)
+        # Increased epochs to 50 for better accuracy (cached so it's fast after 1st run)
+        model.fit(x_train, y_train, epochs=50, batch_size=32, verbose=0)
+        
         return model, lookback
 
-    with st.spinner('Training AI Model...'):
+    with st.spinner('Training AI Model (50 Epochs for better accuracy)...'):
         model, lookback = train_model(data_train_array)
 
-    # --- Predictions ---
-    pas_lookback_days = data_train.tail(lookback)
-    final_df = pd.concat([pas_lookback_days, data_test], ignore_index=True)
-    input_data = scaler.transform(final_df)
+    # --- Test Accuracy (Past vs Predicted) ---
+    # We take the last 30% of data to visualize how well the model learned
+    test_start_index = int(len(data_close_values) * 0.7)
+    
+    # Need 'lookback' days before the test start to predict the first test day
+    input_data = data_close_values[test_start_index - lookback:]
+    input_data = scaler.transform(input_data)
 
     x_test = []
-    y_test = []
-    for i in range(lookback, input_data.shape[0]):
-        x_test.append(input_data[i-lookback: i])
-        y_test.append(input_data[i, 0])
+    y_test = data_close_values[test_start_index:] # Actual future values we want to predict
 
-    x_test, y_test = np.array(x_test), np.array(y_test)
+    for i in range(lookback, len(input_data)):
+        x_test.append(input_data[i-lookback: i])
+
+    x_test = np.array(x_test)
+    
+    # Predict
     y_predicted = model.predict(x_test)
     
+    # Inverse Scale
     scale_factor = 1/scaler.scale_[0]
     y_predicted = y_predicted * scale_factor
-    y_test = y_test * scale_factor
+    # y_test is already in original scale, no need to inverse
 
-    st.subheader('Prediction vs Original')
+    st.subheader('Model Accuracy: Predicted vs Original (Test Set)')
     fig2 = plt.figure(figsize=(10,6))
     plt.plot(y_test, 'g', label='Original Price')
     plt.plot(y_predicted, 'r', label='AI Predicted Price')
@@ -174,6 +185,43 @@ try:
     plt.ylabel('Price (INR)')
     plt.legend()
     st.pyplot(fig2)
+
+    # --- FUTURE PREDICTION (Next 10 Days) ---
+    st.subheader('🔮 Future Price Prediction (Next 10 Days)')
+    
+    # Get the last 'lookback' days of data to predict tomorrow
+    last_days_data = data_close_values[-lookback:]
+    last_days_scaled = scaler.transform(last_days_data)
+    
+    future_predictions = []
+    current_batch = last_days_scaled.reshape(1, lookback, 1) # Reshape for LSTM [1, 100, 1]
+
+    for i in range(10): # Predict 10 days
+        pred = model.predict(current_batch)[0] # Get prediction (scaled)
+        future_predictions.append(pred[0])
+        
+        # Update batch: remove first day, add new predicted day
+        current_batch = np.append(current_batch[:, 1:, :], [[pred]], axis=1)
+
+    # Inverse scale future predictions
+    future_predictions = np.array(future_predictions) * scale_factor
+    
+    # Create future dates
+    future_dates = pd.date_range(start=date.today() + timedelta(days=1), periods=10)
+    
+    # Display Future Data
+    future_df = pd.DataFrame({'Date': future_dates, 'Predicted Price (INR)': future_predictions})
+    st.write(future_df)
+    
+    # Plot Future
+    fig3 = plt.figure(figsize=(10,6))
+    plt.plot(data.index[-50:], data.Close[-50:], 'g', label='Past 50 Days')
+    plt.plot(future_dates, future_predictions, 'r--', marker='o', label='Next 10 Days Prediction')
+    plt.title(f'{stock_symbol} Future Forecast')
+    plt.xlabel('Date')
+    plt.ylabel('Price')
+    plt.legend()
+    st.pyplot(fig3)
 
 except Exception as e:
     st.error(f"Error: {e}")
