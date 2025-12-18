@@ -63,7 +63,15 @@ selected_stock_name = st.sidebar.selectbox(f"Choose a {market_choice} Stock", ['
 
 if selected_stock_name == 'Custom':
     user_input = st.sidebar.text_input('Enter Custom Symbol (e.g., ZOMATO)', 'ZOMATO')
+    
+    # FIX 1: Force Uppercase and Remove Spaces
+    user_input = user_input.upper().strip() 
+    
     # Auto-fix suffix if missing
+    if not user_input.endswith('.NS') and not user_input.endswith('.BO'):
+        stock_symbol = f"{user_input}{suffix}"
+    else:
+        stock_symbol = user_input
     if not user_input.endswith('.NS') and not user_input.endswith('.BO'):
         stock_symbol = f"{user_input}{suffix}"
     else:
