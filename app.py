@@ -8,36 +8,75 @@ from sklearn.preprocessing import MinMaxScaler
 from keras.models import Sequential
 from keras.layers import Dense, Dropout, LSTM
 
-# --- Indian Market Customizations ---
-st.set_page_config(page_title="Nifty 50 Predictor", layout="wide")
+# --- Page Config ---
+st.set_page_config(page_title="Indian Stock Predictor", layout="wide")
 st.header('📈 Indian Stock Market Predictor')
 
-# Sidebar for Indian Stock Selection
+# --- Market Lists ---
+# NIFTY 50 (NSE) - Tickers end with .NS
+nifty_50_dict = {
+    'ADANIENT': 'ADANIENT.NS', 'ADANIPORTS': 'ADANIPORTS.NS', 'APOLLOHOSP': 'APOLLOHOSP.NS', 
+    'ASIANPAINT': 'ASIANPAINT.NS', 'AXISBANK': 'AXISBANK.NS', 'BAJAJ-AUTO': 'BAJAJ-AUTO.NS', 
+    'BAJFINANCE': 'BAJFINANCE.NS', 'BAJAJFINSV': 'BAJAJFINSV.NS', 'BEL': 'BEL.NS', 
+    'BHARTIARTL': 'BHARTIARTL.NS', 'BPCL': 'BPCL.NS', 'BRITANNIA': 'BRITANNIA.NS', 
+    'CIPLA': 'CIPLA.NS', 'COALINDIA': 'COALINDIA.NS', 'DIVISLAB': 'DIVISLAB.NS', 
+    'DRREDDY': 'DRREDDY.NS', 'EICHERMOT': 'EICHERMOT.NS', 'GRASIM': 'GRASIM.NS', 
+    'HCLTECH': 'HCLTECH.NS', 'HDFCBANK': 'HDFCBANK.NS', 'HDFCLIFE': 'HDFCLIFE.NS', 
+    'HEROMOTOCO': 'HEROMOTOCO.NS', 'HINDALCO': 'HINDALCO.NS', 'HINDUNILVR': 'HINDUNILVR.NS', 
+    'ICICIBANK': 'ICICIBANK.NS', 'INDUSINDBK': 'INDUSINDBK.NS', 'INFY': 'INFY.NS', 
+    'ITC': 'ITC.NS', 'JSWSTEEL': 'JSWSTEEL.NS', 'KOTAKBANK': 'KOTAKBANK.NS', 
+    'LT': 'LT.NS', 'LTIM': 'LTIM.NS', 'M&M': 'M&M.NS', 'MARUTI': 'MARUTI.NS', 
+    'NESTLEIND': 'NESTLEIND.NS', 'NTPC': 'NTPC.NS', 'ONGC': 'ONGC.NS', 
+    'POWERGRID': 'POWERGRID.NS', 'RELIANCE': 'RELIANCE.NS', 'SBILIFE': 'SBILIFE.NS', 
+    'SBIN': 'SBIN.NS', 'SUNPHARMA': 'SUNPHARMA.NS', 'TATACONSUM': 'TATACONSUM.NS', 
+    'TATAMOTORS': 'TATAMOTORS.NS', 'TATASTEEL': 'TATASTEEL.NS', 'TCS': 'TCS.NS', 
+    'TECHM': 'TECHM.NS', 'TITAN': 'TITAN.NS', 'ULTRACEMCO': 'ULTRACEMCO.NS', 'WIPRO': 'WIPRO.NS'
+}
+
+# SENSEX 30 (BSE) - Tickers end with .BO
+sensex_30_dict = {
+    'ASIANPAINT': 'ASIANPAINT.BO', 'AXISBANK': 'AXISBANK.BO', 'BAJAJ-AUTO': 'BAJAJ-AUTO.BO',
+    'BAJFINANCE': 'BAJFINANCE.BO', 'BAJAJFINSV': 'BAJAJFINSV.BO', 'BHARTIARTL': 'BHARTIARTL.BO',
+    'DRREDDY': 'DRREDDY.BO', 'HCLTECH': 'HCLTECH.BO', 'HDFCBANK': 'HDFCBANK.BO',
+    'HINDUNILVR': 'HINDUNILVR.BO', 'ICICIBANK': 'ICICIBANK.BO', 'INDUSINDBK': 'INDUSINDBK.BO',
+    'INFY': 'INFY.BO', 'ITC': 'ITC.BO', 'KOTAKBANK': 'KOTAKBANK.BO', 'LT': 'LT.BO',
+    'M&M': 'M&M.BO', 'MARUTI': 'MARUTI.BO', 'NESTLEIND': 'NESTLEIND.BO', 'NTPC': 'NTPC.BO',
+    'ONGC': 'ONGC.BO', 'POWERGRID': 'POWERGRID.BO', 'RELIANCE': 'RELIANCE.BO',
+    'SBIN': 'SBIN.BO', 'SUNPHARMA': 'SUNPHARMA.BO', 'TATASTEEL': 'TATASTEEL.BO',
+    'TCS': 'TCS.BO', 'TECHM': 'TECHM.BO', 'TITAN': 'TITAN.BO', 'ULTRACEMCO': 'ULTRACEMCO.BO',
+    'WIPRO': 'WIPRO.BO'
+}
+
+# --- Sidebar ---
+st.sidebar.subheader('Select Market')
+market_choice = st.sidebar.radio("Market Index", ('NIFTY 50 (NSE)', 'SENSEX 30 (BSE)'))
+
+if market_choice == 'NIFTY 50 (NSE)':
+    stock_dict = nifty_50_dict
+    suffix = '.NS'
+else:
+    stock_dict = sensex_30_dict
+    suffix = '.BO'
+
 st.sidebar.subheader('Select Stock')
-nifty_50 = [
-    'RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'INFY', 'SBIN', 'BHARTIARTL', 'ITC', 
-    'LTIM', 'TATAMOTORS', 'LT', 'HCLTECH', 'AXISBANK', 'MARUTI', 'TITAN', 'ZOMATO'
-]
-stock_selection = st.sidebar.selectbox("Choose a NIFTY 50 Stock", ['Custom'] + nifty_50)
+selected_stock_name = st.sidebar.selectbox(f"Choose a {market_choice} Stock", ['Custom'] + list(stock_dict.keys()))
 
-if stock_selection == 'Custom':
+if selected_stock_name == 'Custom':
     user_input = st.sidebar.text_input('Enter Custom Symbol (e.g., ZOMATO)', 'ZOMATO')
+    # Auto-fix suffix if missing
+    if not user_input.endswith('.NS') and not user_input.endswith('.BO'):
+        stock_symbol = f"{user_input}{suffix}"
+    else:
+        stock_symbol = user_input
 else:
-    user_input = stock_selection
+    stock_symbol = stock_dict[selected_stock_name]
 
-# Auto-append .NS
-if not user_input.endswith('.NS') and not user_input.endswith('.BO'):
-    stock_symbol = f"{user_input}.NS"
-else:
-    stock_symbol = user_input
-
-# --- FIX 1: USE LIVE DATES ---
+# --- Data Fetching ---
 start = '2015-01-01'
-end = date.today().strftime("%Y-%m-%d") # This gets TODAY'S date automatically
+end = date.today().strftime("%Y-%m-%d")
 
 st.write(f"Fetching data for: **{stock_symbol}** from {start} to {end}")
 
-# --- FIX 2: CACHING THE DATA FETCHING ---
 @st.cache_data
 def load_data(symbol, start, end):
     data = yf.download(symbol, start, end)
@@ -47,18 +86,13 @@ try:
     data = load_data(stock_symbol, start, end)
     
     if data.empty:
-        st.error("No data found. Please check the stock symbol.")
+        st.error(f"No data found for {stock_symbol}. Try checking the symbol.")
         st.stop()
 
-    st.subheader('Stock Data (INR)')
-    st.write(data.tail()) # Shows the most recent dates (Up to yesterday/today)
+    st.subheader(f'{stock_symbol} - Stock Data (INR)')
+    st.write(data.tail())
 
-    # Prepare Data
-    data_train = pd.DataFrame(data.Close[0: int(len(data)*0.80)])
-    data_test = pd.DataFrame(data.Close[int(len(data)*0.80): len(data)])
-    
-    scaler = MinMaxScaler(feature_range=(0,1))
-
+    # --- Analysis (MA) ---
     st.subheader('Price vs Moving Averages')
     ma_50 = data.Close.rolling(50).mean()
     ma_200 = data.Close.rolling(200).mean()
@@ -66,11 +100,16 @@ try:
     plt.plot(data.Close, 'g', label='Close Price')
     plt.plot(ma_50, 'r', label='50 Day MA')
     plt.plot(ma_200, 'b', label='200 Day MA')
+    plt.title(f'{stock_symbol} Price History')
     plt.legend()
     st.pyplot(fig1)
 
-    # --- FIX 3: CACHING THE MODEL TRAINING ---
-    # This prevents the "Training..." spinner from appearing if you just switch tabs or reload
+    # --- LSTM Model ---
+    scaler = MinMaxScaler(feature_range=(0,1))
+    data_train = pd.DataFrame(data.Close[0: int(len(data)*0.80)])
+    data_test = pd.DataFrame(data.Close[int(len(data)*0.80): len(data)])
+    data_train_array = scaler.fit_transform(data_train)
+
     @st.cache_resource
     def train_model(data_train_array):
         x_train = []
@@ -94,13 +133,10 @@ try:
         model.fit(x_train, y_train, epochs=5, batch_size=32, verbose=0)
         return model
 
-    # Scale data
-    data_train_array = scaler.fit_transform(data_train)
-    
-    with st.spinner('Training AI Model... (Only happens once per stock)'):
+    with st.spinner('Training AI Model...'):
         model = train_model(data_train_array)
 
-    # Prediction Logic
+    # --- Predictions ---
     pas_100_days = data_train.tail(100)
     final_df = pd.concat([pas_100_days, data_test], ignore_index=True)
     input_data = scaler.transform(final_df)
